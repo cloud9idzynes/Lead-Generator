@@ -1,0 +1,7 @@
+{
+  "name": "AI Lead Scraper",
+  "description": "An intelligent lead generation application that uses AI to find business leads based on search criteria and location. It scrapes detailed information and sends it to a specified webhook.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
