@@ -20,92 +20,152 @@ const getGeolocation = (): Promise<{ latitude: number; longitude: number } | nul
   });
 };
 
-export async function fetchLeads(searchQuery: string, city: string, country: string, leadCount: number): Promise<Omit<Lead, 'id' | 'webhookStatus'>[]> {
+export async function fetchLeads(
+  searchQuery: string,
+  city: string,
+  country: string,
+  leadCount: number,
+  runSeoAnalysis: boolean,
+  onProgress: (message: string) => void
+): Promise<Omit<Lead, 'id' | 'webhookStatus'>[]> {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
-  const prompt = `You are a world-class lead generation expert with advanced web-scraping capabilities.
-Your task is to find a list of up to ${leadCount} business leads based on the following criteria: '${searchQuery}' in '${city}, ${country}'.
-
-Follow this multi-step process for each potential lead to ensure maximum data accuracy and completeness:
-1.  **Initial Discovery (Google Maps):** Use Google Maps to identify a list of businesses matching the search query in the specified location. From this initial search, extract core information like Company Name, Address, Phone Number, Category, Rating, and Review Count.
-2.  **Deep Dive (Google Search):** For each business identified, perform a targeted Google Search using the company name and city to find their official website.
-3.  **Data Enrichment (Website & Search):**
-    *   Scour the official website. Look for an 'About Us' page for the \`description\`, a 'Services' or 'Products' page for the list of \`services\`, and a 'Contact' or 'Hours' page for \`businessHours\`.
-    *   Also search the website for a contact Email address, a LinkedIn company page URL, a Facebook page URL, and an Instagram profile URL.
-    *   If this information is not on the website, use Google Search again with queries like "[Company Name] services", "[Company Name] LinkedIn" or "[Company Name] contact email" to find them.
-4.  **Final Assembly:** Consolidate all the gathered information into the precise JSON structure defined below. If, after thorough searching, a piece of information cannot be found, use \`null\`.
-
-For each lead found, you MUST provide the data in a structured JSON format. The final output must be a single JSON object with a key named "leads" which contains an array of lead objects.
-The structure for each lead object is as follows:
-{
-  "generatedDate": "string (ISO 8601 format)",
-  "searchCity": "string (The city used for the search: ${city})",
-  "searchCountry": "string (The country used for the search: ${country})",
-  "leadNumber": "integer (A sequential number for the lead in this batch)",
-  "companyName": "string",
-  "category": "string",
-  "description": "string | null",
-  "address": "string | null",
-  "city": "string | null",
-  "country": "string | null",
-  "coordinates": { "lat": "number", "lon": "number" } | null,
-  "phone": "string | null",
-  "email": "string | null",
-  "website": "string | null",
-  "linkedIn": "string | null",
-  "facebook": "string | null",
-  "instagram": "string | null",
-  "rating": "number | null",
-  "reviewCount": "integer | null",
-  "businessHours": { "Monday": "string", "Tuesday": "string", "Wednesday": "string", "Thursday": "string", "Friday": "string", "Saturday": "string", "Sunday": "string" } | null,
-  "services": "string[] | null (A list of key services or products offered)",
-  "qualityScore": "integer (1-100 based on data completeness and accuracy)",
-  "qualityReasoning": "string (Briefly explain the quality score)",
-  "status": "'New'",
-  "contacted": "false",
-  "notes": "''"
-}
-
-IMPORTANT: Your entire response MUST be a JSON object wrapped in a single markdown code block. For example:
-\`\`\`json
-{
-  "leads": [
-    { /* ...lead data... */ }
-  ]
-}
-\`\`\`
-Do not include any text, conversation, or explanation outside of this JSON code block.`;
-
   const userLocation = await getGeolocation();
 
-  try {
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: prompt,
-      config: {
-        tools: [{ googleMaps: {} }, { googleSearch: {} }],
-        ...(userLocation ? { toolConfig: { retrievalConfig: { latLng: userLocation } } } : {}),
-      },
-    });
+  const finalLeads: Omit<Lead, 'id' | 'webhookStatus'>[] = [];
+  let rateLimitHit = false;
 
-    const rawText = response.text;
-    const jsonMatch = rawText.match(/```json\n([\s\S]*)\n```/);
-    const jsonText = jsonMatch ? jsonMatch[1] : rawText.trim();
+  for (let i = 0; i < leadCount; i++) {
+    onProgress(`Generating lead ${i + 1}/${leadCount}...`);
+
+    const alreadyFoundCompanies = finalLeads.map(lead => lead.companyName).join(', ');
+    const exclusionPrompt = alreadyFoundCompanies
+      ? `\n\n**IMPORTANT EXCLUSION:** You have already found the following businesses: "${alreadyFoundCompanies}". Do not return any of these. Find a new, different business.`
+      : '';
+      
+    const leadJsonStructure = `
+    {
+    "generatedDate": "string (ISO 8601 format)",
+    "searchCity": "string (The city used for the search: ${city})",
+    "searchCountry": "string (The country used for the search: ${country})",
+    "leadNumber": "integer (A sequential number for the lead in this batch)",
+    "companyName": "string",
+    "category": "string",
+    "description": "string | null",
+    "address": "string | null",
+    "city": "string | null",
+    "country": "string | null",
+    "coordinates": { "lat": "number", "lon": "number" } | null,
+    "phone": "string | null",
+    "email": "string | null",
+    "website": "string | null",
+    "linkedIn": "string | null",
+    "facebook": "string | null",
+    "instagram": "string | null",
+    "twitter": "string | null",
+    "rating": "number | null",
+    "reviewCount": "integer | null",
+    "businessHours": { "Monday": "string", "Tuesday": "string", "Wednesday": "string", "Thursday": "string", "Friday": "string", "Saturday": "string", "Sunday": "string" } | null,
+    "services": "string[] | null (A list of key services or products offered)",
+    "companySize": "string | null (e.g., '11-50 employees')",
+    "employeeCount": "integer | null",
+    "postFrequency": "'Daily' | 'Weekly' | 'Monthly' | 'Inactive' | null",
+    "engagementLevel": "'High' | 'Medium' | 'Low' | null",
+    "qualityScore": "integer (1-100 based on data completeness and accuracy)",
+    "qualityReasoning": "string (Briefly explain the quality score)",
+    "status": "'New'",
+    "contacted": "false",
+    "notes": "''"
+    ${runSeoAnalysis ? `,
+    "hasWebsite": "boolean",
+    "websiteSeoScore": "integer | null (1-10)",
+    "hasGbpListing": "boolean",
+    "gbpSeoScore": "integer | null (1-10)",
+    "seoRecommendations": "string | null (Formatted string with improvement tips)"
+    ` : ''}
+    }`;
+
+    const seoAnalysisInstructions = runSeoAnalysis ? `
+    **SEO & Local SEO Analysis Instructions (CRITICAL):**
+    Once a business website is found, you MUST perform a thorough SEO and Local SEO analysis.
+    1. Website SEO Analysis: Check on-page fundamentals (titles, headers), content relevance, technical aspects (HTTPS, mobile-friendly), and local signals (NAP consistency).
+    2. GBP Analysis: Check profile completeness, customer engagement (reviews, responses), and recent activity (posts).
+    3. Actionable Recommendations: Combine findings into a markdown-formatted string in the \`seoRecommendations\` field with specific, actionable tips. Example format: "### Website Improvements\\n- **Technical:** Your site is secure (Good!).\\n### GBP Improvements\\n- **Engagement:** Respond to new reviews."
+    ` : '';
+
+    const prompt = `You are an AI lead generation expert.
+Your task is to find a single business that matches the following criteria and has not been found yet.
+
+Search Criteria: '${searchQuery}'
+Location: '${city}, ${country}'
+${exclusionPrompt}
+
+**CRITICAL DATA POINTS:**
+1. **Website:** Perform a dedicated, persistent search to find the company's official website.
+2. **Email:** If a website is found, you MUST then analyze it to locate a contact email address.
+
+Then, gather all other information as defined in the JSON structure below. If, after a persistent search, you cannot find a piece of information, use \`null\`.
+
+Your final output MUST be a single JSON object inside a markdown code block. Do not include any other text.
+The structure for the JSON object is:
+${leadJsonStructure}
+
+${seoAnalysisInstructions}
+`;
+
+    try {
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-pro",
+        contents: prompt,
+        config: {
+          tools: [{ googleMaps: {} }, { googleSearch: {} }],
+          ...(userLocation ? { toolConfig: { retrievalConfig: { latLng: userLocation } } } : {}),
+        },
+      });
+
+      const rawText = response.text;
+      const jsonMatch = rawText.match(/```json\n([\s\S]*)\n```/);
+      let newLead: Omit<Lead, 'id' | 'webhookStatus'>;
+
+       if (!jsonMatch) {
+         try {
+          newLead = JSON.parse(rawText.trim());
+        } catch (e) {
+           console.warn(`Could not parse non-markdown JSON for lead ${i + 1}. Skipping. Content: ${rawText}`);
+           continue; // Skip this lead
+        }
+      } else {
+         const jsonText = jsonMatch[1];
+         newLead = JSON.parse(jsonText);
+      }
+      
+      if (newLead && newLead.companyName) {
+        newLead.leadNumber = i + 1;
+        finalLeads.push(newLead);
+      } else {
+        console.warn(`Generated lead ${i + 1} was invalid or missing a company name. Skipping.`);
+      }
+    } catch (err: any) {
+      const errorMessage = JSON.stringify(err);
+      if (errorMessage.includes("RESOURCE_EXHAUSTED") || errorMessage.includes('"code":429')) {
+        onProgress('API Rate Limit Exceeded: You have hit your daily quota. The leads generated so far are displayed below.');
+        rateLimitHit = true;
+        console.error("API Rate Limit Exceeded. Returning partial results.", err);
+        break; // Exit the loop and return what we have so far.
+      }
+      
+      // For other errors, log them and continue to the next lead.
+      console.error(`Failed to generate lead ${i + 1}, skipping. Error:`, err);
+    }
     
-    if (!jsonText) {
-      throw new Error("AI response was empty.");
+    // Add a delay between requests to avoid hitting per-minute rate limits
+    if (i < leadCount - 1) { // No need to wait after the last one
+      await new Promise(resolve => setTimeout(resolve, 1500)); // 1.5 second delay
     }
-
-    const parsedResponse = JSON.parse(jsonText);
-
-    if (!parsedResponse.leads || !Array.isArray(parsedResponse.leads)) {
-      throw new Error("AI response did not contain a valid 'leads' array.");
-    }
-
-    return parsedResponse.leads;
-
-  } catch (error) {
-    console.error("Error fetching leads from Gemini:", error);
-    throw new Error("Failed to get a valid response from the AI. The model may be unable to find leads for this query or the response format was incorrect.");
   }
+  
+  if (!rateLimitHit) {
+    onProgress('Lead generation complete!');
+  }
+  
+  return finalLeads;
 }

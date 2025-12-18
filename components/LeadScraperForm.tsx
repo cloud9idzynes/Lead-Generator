@@ -1,41 +1,90 @@
 import React, { useState } from 'react';
-import { SearchIcon } from './Icons';
+import { SearchIcon, SparklesIcon } from './Icons';
 
 interface LeadScraperFormProps {
-  onScrape: (searchQuery: string, city: string, country: string, leadCount: number, webhookUrl: string) => void;
+  onScrape: (searchQuery: string, city: string, country: string, leadCount: number, runSeoAnalysis: boolean) => void;
   isLoading: boolean;
 }
 
+const gbpCategories = [
+  "Accountants",
+  "Auto Repair Shops",
+  "Bakeries",
+  "Bookstores",
+  "Cafes",
+  "Car Dealers",
+  "Car Washes",
+  "Chiropractors",
+  "Clothing Stores",
+  "Dentists",
+  "Electricians",
+  "Florists",
+  "Gyms",
+  "HVAC Contractors",
+  "Italian Restaurants",
+  "Jewelry Stores",
+  "Landscapers",
+  "Law Firms",
+  "Marketing Agencies",
+  "Massage Therapists",
+  "Mexican Restaurants",
+  "Painters",
+  "Pet Stores",
+  "Pizza Restaurants",
+  "Plumbers",
+  "Real Estate Agents",
+  "Roofing Contractors",
+  "Sushi Restaurants",
+  "Tire Shops",
+  "Web Designers",
+  "Yoga Studios",
+].sort();
+
 const LeadScraperForm: React.FC<LeadScraperFormProps> = ({ onScrape, isLoading }) => {
   const [searchQuery, setSearchQuery] = useState('Italian Restaurants');
+  const [customSearchQuery, setCustomSearchQuery] = useState('');
   const [city, setCity] = useState('New York');
   const [country, setCountry] = useState('USA');
   const [leadCount, setLeadCount] = useState(10);
-  const [webhookUrl, setWebhookUrl] = useState('');
+  const [runSeoAnalysis, setRunSeoAnalysis] = useState(true);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (searchQuery && city && country && webhookUrl && !isLoading) {
-      onScrape(searchQuery, city, country, leadCount, webhookUrl);
+    const finalSearchQuery = searchQuery === '_OTHER_' ? customSearchQuery : searchQuery;
+    if (finalSearchQuery && city && country && !isLoading) {
+      onScrape(finalSearchQuery, city, country, leadCount, runSeoAnalysis);
     }
   };
 
   const inputClasses = "w-full bg-slate-700 border border-slate-600 rounded-md py-2 px-3 text-slate-200 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 transition-colors";
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <>
+    <form onSubmit={handleSubmit} className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
-          <label htmlFor="searchQuery" className="block text-sm font-medium text-slate-400 mb-1">Search Query</label>
-          <input
+          <label htmlFor="searchQuery" className="block text-sm font-medium text-slate-400 mb-1">Business Category</label>
+           <select
             id="searchQuery"
-            type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="e.g., 'plumbers', 'software companies'"
             className={inputClasses}
-            required
-          />
+          >
+            {gbpCategories.map((category) => (
+                <option key={category} value={category}>{category}</option>
+            ))}
+            <option value="_OTHER_">Other (please specify)</option>
+          </select>
+          {searchQuery === '_OTHER_' && (
+             <input
+                type="text"
+                value={customSearchQuery}
+                onChange={(e) => setCustomSearchQuery(e.target.value)}
+                placeholder="Enter custom business category"
+                className={`${inputClasses} mt-2`}
+                required
+              />
+          )}
         </div>
         <div>
           <label htmlFor="city" className="block text-sm font-medium text-slate-400 mb-1">City</label>
@@ -76,17 +125,31 @@ const LeadScraperForm: React.FC<LeadScraperFormProps> = ({ onScrape, isLoading }
           </select>
         </div>
       </div>
-      <div>
-        <label htmlFor="webhookUrl" className="block text-sm font-medium text-slate-400 mb-1">Webhook URL</label>
-        <input
-          id="webhookUrl"
-          type="url"
-          value={webhookUrl}
-          onChange={(e) => setWebhookUrl(e.target.value)}
-          placeholder="https://your-automation-webhook.com"
-          className={inputClasses}
-          required
-        />
+
+      <div className="flex items-center justify-between bg-slate-700/50 p-4 rounded-lg border border-cyan-500/30 shadow-inner">
+        <div className="flex-grow flex items-start">
+          <SparklesIcon className="w-6 h-6 mr-3 text-cyan-400 flex-shrink-0 mt-1" />
+          <div>
+            <label htmlFor="seoAnalysis" className="font-medium text-slate-200">
+              Enable AI SEO Power-Up
+            </label>
+            <p className="text-xs text-slate-400 mt-1">
+              Analyze website and Google Business Profile for SEO scores and actionable recommendations.
+            </p>
+          </div>
+        </div>
+        <div className="ml-4">
+            <label htmlFor="seoAnalysis" className="relative inline-flex items-center cursor-pointer">
+                <input 
+                    type="checkbox" 
+                    id="seoAnalysis" 
+                    className="sr-only peer" 
+                    checked={runSeoAnalysis}
+                    onChange={(e) => setRunSeoAnalysis(e.target.checked)}
+                />
+                <div className="w-11 h-6 bg-slate-600 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-cyan-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-600"></div>
+            </label>
+        </div>
       </div>
       <button
         type="submit"
@@ -109,6 +172,7 @@ const LeadScraperForm: React.FC<LeadScraperFormProps> = ({ onScrape, isLoading }
         )}
       </button>
     </form>
+    </>
   );
 };
 
